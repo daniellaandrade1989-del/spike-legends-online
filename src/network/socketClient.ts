@@ -371,9 +371,11 @@ class NetworkClient {
 
     const socket = io(window.location.origin, {
       transports: ['websocket', 'polling'],
+      upgrade: true,
+      rememberUpgrade: true,
       reconnection: true,
       reconnectionAttempts: 10,
-      reconnectionDelay: 800,
+      reconnectionDelay: 500,
     });
 
     socket.on('connect', () => {
