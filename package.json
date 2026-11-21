@@ -1,46 +1,384 @@
-{
-  "name": "spike-legends-online",
-  "private": true,
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "tsx server.ts",
-    "start": "tsx server.ts",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
-    "test": "tsx --test src/physics/volleyballRules.test.ts src/physics/rapierWorld.test.ts firestore.rules.test.ts"
-  },
-  "dependencies": {
-    "@dimforge/rapier3d-compat": "^0.21.0",
-    "@firebase/eslint-plugin-security-rules": "^0.0.2",
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/three": "^0.187.0",
-    "@vitejs/plugin-react": "^6.1.1",
-    "dotenv": "^17.2.3",
-    "eslint": "^10.15.0",
-    "express": "^4.21.2",
-    "firebase": "^13.3.0",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "socket.io": "^4.8.4",
-    "socket.io-client": "^4.8.4",
-    "three": "^0.187.0",
-    "tsx": "^4.21.0",
-    "vite": "^8.3.0"
-  },
-  "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2"
+
+/**
+ * SPIKE LEGENDS ONLINE
+ * Express + Socket.IO + Vite
+ *
+ * Servidor principal do jogo.
+ */
+
+import 'dotenv/config';
+
+import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import express from 'express';
+import { Server as SocketIOServer } from 'socket.io';
+
+import { RoomManager } from './server/roomManager.ts';
+import { registerAudioStorageRoutes } from './server/audioStorageRoutes.ts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
+
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+const JSON_LIMIT = process.env.JSON_LIMIT || '10mb';
+
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+let httpServer: http.Server | undefined;
+let io: SocketIOServer | undefined;
+let viteClose: (() => Promise<void>) | undefined;
+
+let shuttingDown = false;
+
+/**
+ * Validação de origem.
+ */
+function isOriginAllowed(origin?: string): boolean {
+  // Clientes nativos e ferramentas sem Origin.
+  if (!origin) return true;
+
+  // Desenvolvimento local.
+  if (!IS_PRODUCTION) return true;
+
+  // Em produção, exigir origens explicitamente autorizadas.
+  return ALLOWED_ORIGINS.includes(origin.replace(/\/$/, ''));
+}
+
+/**
+ * Inicialização do servidor.
+ */
+async function bootstrapServer(): Promise<void> {
+  const app = express();
+
+  app.disable('x-powered-by');
+
+  httpServer = http.createServer(app);
+
+  /**
+   * Reduz a espera no envio de pacotes TCP pequenos.
+   */
+  httpServer.on('connection', (socket) => {
+    socket.setNoDelay(true);
+  });
+
+  /**
+   * Socket.IO.
+   */
+  io = new SocketIOServer(httpServer, {
+    cors: {
+      origin: (origin, callback) => {
+        if (isOriginAllowed(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Origem não autorizada.'));
+        }
+      },
+      methods: ['GET', 'POST'],
+      credentials: true,
+    },
+
+    /**
+     * Também valida a origem na conexão,
+     * incluindo conexões WebSocket.
+     */
+    allowRequest: (request, callback) => {
+      const origin = request.headers.origin;
+
+      callback(null, isOriginAllowed(origin));
+    },
+
+    transports: ['websocket', 'polling'],
+
+    // Não comprimir pacotes pequenos e frequentes do jogo.
+    perMessageDeflate: false,
+    httpCompression: false,
+
+    // Monitoramento da conexão.
+    pingInterval: 10000,
+    pingTimeout: 20000,
+
+    // Limite de tamanho por pacote Socket.IO.
+    maxHttpBufferSize: 1e6,
+
+    // Não desconectar automaticamente por causa de uma
+    // reconexão temporária de transporte.
+    connectTimeout: 45000,
+  });
+
+  /**
+   * Middlewares HTTP.
+   */
+  app.use(
+    express.json({
+      limit: JSON_LIMIT,
+    }),
+  );
+
+  app.use(
+    express.urlencoded({
+      extended: true,
+      limit: JSON_LIMIT,
+    }),
+  );
+
+  /**
+   * Health check.
+   */
+  app.get('/api/health', (_req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      game: 'Spike Legends Online',
+      environment: IS_PRODUCTION ? 'production' : 'development',
+      multiplayer: io?.engine?.clientsCount >= 0,
+      connectedClients: io?.engine?.clientsCount ?? 0,
+      uptime: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  /**
+   * Rotas de armazenamento de áudio.
+   */
+  registerAudioStorageRoutes(app);
+
+  /**
+   * Gerenciamento das salas multiplayer.
+   */
+  const roomManager = new RoomManager(io);
+
+  io.on('connection', (socket) => {
+    if (shuttingDown) {
+      socket.disconnect(true);
+      return;
+    }
+
+    console.log(`[MULTIPLAYER] Conectado: ${socket.id}`);
+
+    /**
+     * Captura erros síncronos e assíncronos.
+     */
+    Promise.resolve(roomManager.handleConnection(socket)).catch((error) => {
+      console.error(
+        `[MULTIPLAYER] Falha ao inicializar ${socket.id}:`,
+        error,
+      );
+
+      socket.disconnect(true);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log(
+        `[MULTIPLAYER] Desconectado: ${socket.id} | ${reason}`,
+      );
+    });
+
+    socket.on('error', (error) => {
+      console.error(`[MULTIPLAYER] Erro em ${socket.id}:`, error);
+    });
+  });
+
+  /**
+   * Configuração do frontend.
+   */
+  if (IS_PRODUCTION) {
+    const distDir = path.resolve(__dirname, 'dist');
+    const indexFile = path.join(distDir, 'index.html');
+
+    app.use(
+      express.static(distDir, {
+        index: false,
+        fallthrough: true,
+        maxAge: '1d',
+      }),
+    );
+
+    /**
+     * Fallback para aplicações SPA.
+     * Compatível com Express 4.
+     */
+    app.use((req, res, next) => {
+      if (
+        req.method !== 'GET' ||
+        req.path.startsWith('/api/') ||
+        req.path.startsWith('/socket.io/') ||
+        req.path.startsWith('/assets/')
+      ) {
+        return next();
+      }
+
+      res.sendFile(indexFile, (error) => {
+        if (error) {
+          next(error);
+        }
+      });
+    });
+  } else {
+    /**
+     * Vite em modo middleware.
+     */
+    const { createServer: createViteServer } = await import('vite');
+
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+      },
+      appType: 'spa',
+    });
+
+    viteClose = () => vite.close();
+
+    app.use(vite.middlewares);
+  }
+
+  /**
+   * Rota inexistente.
+   */
+  app.use((_req, res) => {
+    res.status(404).json({
+      error: 'Rota não encontrada.',
+    });
+  });
+
+  /**
+   * Tratamento centralizado de erros.
+   */
+  app.use(
+    (
+      error: Error & { status?: number },
+      _req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      console.error('[HTTP] Erro:', error);
+
+      if (res.headersSent) return;
+
+      const status =
+        typeof error.status === 'number' &&
+        error.status >= 400 &&
+        error.status < 600
+          ? error.status
+          : 500;
+
+      res.status(status).json({
+        error:
+          IS_PRODUCTION && status === 500
+            ? 'Erro interno do servidor.'
+            : error.message,
+      });
+    },
+  );
+
+  /**
+   * Inicializa o servidor HTTP.
+   */
+  await new Promise<void>((resolve, reject) => {
+    const server = httpServer!;
+
+    const onError = (error: Error) => {
+      reject(error);
+    };
+
+    server.once('error', onError);
+
+    server.listen(PORT, HOST, () => {
+      server.off('error', onError);
+      resolve();
+    });
+  });
+
+  console.log('');
+  console.log('==========================================');
+  console.log('       SPIKE LEGENDS ONLINE');
+  console.log('==========================================');
+  console.log(`Servidor:       http://${HOST}:${PORT}`);
+  console.log(`Ambiente:       ${IS_PRODUCTION ? 'Produção' : 'Desenvolvimento'}`);
+  console.log('Socket.IO:      Ativo');
+  console.log('Transporte:     WebSocket / Polling');
+  console.log('TCP NoDelay:    Ativo');
+  console.log('Compressão:     Desativada');
+  console.log('==========================================');
+  console.log('');
+}
+
+/**
+ * Encerramento seguro.
+ */
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+
+  shuttingDown = true;
+
+  console.log(`\n[SHUTDOWN] Sinal recebido: ${signal}`);
+
+  try {
+    if (io) {
+      await new Promise<void>((resolve) => {
+        io!.close(() => resolve());
+      });
+
+      console.log('[SHUTDOWN] Socket.IO encerrado.');
+    } else if (httpServer?.listening) {
+      await new Promise<void>((resolve, reject) => {
+        httpServer!.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
+
+    if (viteClose) {
+      await viteClose();
+      console.log('[SHUTDOWN] Vite encerrado.');
+    }
+
+    console.log('[SHUTDOWN] Servidor encerrado.');
+    process.exitCode = 0;
+  } catch (error) {
+    console.error('[SHUTDOWN] Falha no encerramento:', error);
+    process.exitCode = 1;
   }
 }
+
+/**
+ * Sinais do sistema operacional.
+ */
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+
+/**
+ * Inicialização principal.
+ */
+bootstrapServer().catch(async (error) => {
+  console.error('[FATAL] Falha ao iniciar o servidor:', error);
+
+  try {
+    if (io) {
+      await new Promise<void>((resolve) => {
+        io!.close(() => resolve());
+      });
+    }
+
+    if (viteClose) {
+      await viteClose();
+    }
+  } catch (cleanupError) {
+    console.error('[FATAL] Erro durante limpeza:', cleanupError);
+  }
+
+  process.exitCode = 1;
+});
