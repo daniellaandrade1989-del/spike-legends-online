@@ -15,11 +15,20 @@ const __dirname = path.dirname(__filename);
 async function bootstrapServer() {
   const app = express();
   const server = http.createServer(app);
+
+  // Envia pacotes pequenos de jogo imediatamente sem aguardar buffer TCP (Nagle)
+  server.on('connection', (tcpSocket) => {
+    tcpSocket.setNoDelay(true);
+  });
+
   const io = new SocketIOServer(server, {
     cors: {
       origin: '*',
       methods: ['GET', 'POST'],
     },
+    transports: ['websocket', 'polling'],
+    perMessageDeflate: false,
+    httpCompression: false,
     pingInterval: 10000,
     pingTimeout: 5000,
   });
