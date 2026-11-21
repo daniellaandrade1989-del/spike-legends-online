@@ -204,7 +204,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const flashOverlayRef = useRef<HTMLDivElement | null>(null);
 
-  // Refs para evitar recriação do WebGLRenderer quando estado React muda
   const screenStateRef = useRef(screenState);
   screenStateRef.current = screenState;
 
@@ -237,18 +236,19 @@ export const GameViewport: React.FC<GameViewportProps> = ({
   const rebuildArenaFnRef = useRef<((arenaId: ArenaId) => void) | null>(null);
   const startLocalSimFnRef = useRef<(() => void) | null>(null);
   const latestOnlineSnapRef = useRef<MatchSnapshot | null>(null);
-  const latestRemoteInputsRef = useRef>(new Map());
+  const latestRemoteInputsRef = useRef | null>(null);
+  if (!latestRemoteInputsRef.current) {
+    latestRemoteInputsRef.current = new Map();
+  }
   const pendingNetworkSetsRef = useRef<PerformSetPayload[]>([]);
   const processedEventsTickRef = useRef<number>(-1);
 
-  // Troca de arena quando o jogador escolhe outro mapa
   useEffect(() => {
     if (activeArenaRef.current !== matchConfig.arenaId && rebuildArenaFnRef.current) {
       rebuildArenaFnRef.current(matchConfig.arenaId);
     }
   }, [matchConfig.arenaId]);
 
-  // Vigia de estado da tela no palco 3D: se a tela atual não for a partida ativa, corta imediatamente a plateia
   useEffect(() => {
     if (screenState !== 'playing' && screenState !== 'paused' && screenState !== 'guide') {
       customSoundtrackManager.stopCrowd();
@@ -256,11 +256,10 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     }
   }, [screenState]);
 
-  // Reinicia simulação local quando matchNonce ou modo local/host P2P muda
   useEffect(() => {
     processedEventsTickRef.current = -1;
     pendingNetworkSetsRef.current = [];
-    latestRemoteInputsRef.current.clear();
+    latestRemoteInputsRef.current?.clear();
     if (matchConfig.isOnline) {
       latestOnlineSnapRef.current = matchConfig.initialSnapshot ?? null;
       const isOnlineHost = Boolean(
@@ -285,12 +284,14 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     matchConfig.targetPoints,
   ]);
 
-  // Escuta pacotes P2P do RTCDataChannel diretamente em useRefs (Zero useState / Zero Re-render do React!)
   useEffect(() => {
     const unsubSnap = networkClient.onMatchSnapshot((snap) => {
       latestOnlineSnapRef.current = snap;
     });
     const unsubRemoteInput = networkClient.onRemoteInput(({ playerId, input }) => {
+      if (!latestRemoteInputsRef.current) {
+        latestRemoteInputsRef.current = new Map();
+      }
       const prev = latestRemoteInputsRef.current.get(playerId);
       latestRemoteInputsRef.current.set(playerId, mergeLatchedPlayerInput(prev, input));
     });
@@ -364,13 +365,11 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     camera.position.set(0, 5.8 + initPortraitPull * 0.28, 29.8 + initPortraitPull * 1.35);
     camera.lookAt(0, 1.65, 0);
 
-    // Environment map procedural obrigatório
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     const envTex = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environment = envTex;
     pmremGenerator.dispose();
 
-    // Iluminação quente/fria equilibrada (Key + Hemisphere + Rim)
     const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x7c2d12, 0.72);
     scene.add(hemiLight);
 
@@ -416,7 +415,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       activeArenaRef.current = arenaId;
     };
 
-    // Estado da simulação local Rapier + Buffer Circular de Replay Instantâneo (5s)
     let localWorld: VolleyballRapierWorld | null = null;
     let rapierInitialized = false;
     let simAccumulator = 0;
@@ -426,7 +424,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     let lastReplayMetaKey = '';
     let prevSimPhase: MatchSnapshot['phase'] = 'serve_wait';
 
-    // Previsão local imediata (Client-Side Prediction) para o convidado online responder em 0ms
     const guestPred = {
       initialized: false,
       x: 0,
@@ -646,7 +643,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
                       },
                     ];
 
-      // Na tela de título, todos jogam como IA em exibição viva 2v2
       if (screenStateRef.current === 'title' && roster.length > 0) {
         roster[0].isAi = true;
       }
@@ -667,7 +663,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       pendingReplayDelay = -1;
       replayManager.clearBuffer();
       emitReplayMeta(true);
-      // Gera snapshot inicial imediato para posicionar heróis e bola na arena selecionada
       currentSnapshot = localWorld.collectSnapshot();
       prevSimPhase = currentSnapshot.phase;
     };
@@ -675,7 +670,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     startLocalSimFnRef.current = () => {
       guestPred.initialized = false;
       guestPred.lastReconciledTick = -1;
-      // Para exclusivamente a música de fundo (bgmSource.Stop()) ao iniciar a simulação da partida
       if (screenStateRef.current === 'playing' || screenStateRef.current === 'guide') {
         const bgmAudioSource = customSoundtrackManager.bgmAudioSource;
         if (bgmAudioSource != null && bgmAudioSource.isPlaying) {
@@ -692,7 +686,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     };
     void initLocalSimulation();
 
-    // Gerenciamento Unificado de Inputs via InputManager (Teclado + Mouse LMB/RMB + Touch)
     const inputManager = globalInputManager;
     inputManager.reset();
 
@@ -712,7 +705,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
-      // TRAVA 4 (Verificação de Input Fantasma): Bloqueia inputs de movimentação se o Menu Inicial estiver aberto
       if (screenStateRef.current !== 'playing' && screenStateRef.current !== 'paused') {
         inputManager.reset();
         return;
@@ -774,7 +766,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       _pointerNdc.set(ndcX, ndcY);
       _raycaster.setFromCamera(_pointerNdc, camera);
 
-      // ScreenToWorldPoint exato no plano 2D do jogo (Z = 0) com fallback no chão da quadra (Y = 0)
       const hitPlay = _raycaster.ray.intersectPlane(_playPlane, _playHit);
       let rawWorldX = ndcX * COURT.HALF_WIDTH;
       let rawWorldY = 0.1;
@@ -832,7 +823,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     window.addEventListener('blur', clearInputs);
     document.addEventListener('visibilitychange', clearInputs);
 
-    // ResizeObserver para manter proporção responsiva e repintar imediatamente após redimensionamento
     const resizeObserver = new ResizeObserver(() => {
       const w = container.clientWidth || window.innerWidth;
       const h = container.clientHeight || window.innerHeight;
@@ -850,7 +840,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       renderer.compile(scene, camera);
     }
 
-    // Scratch objects (Zero GC no loop)
     const _ballQuat = new THREE.Quaternion();
     const _activePos = { x: -4.2, y: 0, z: 0 };
     const _ballPos = { x: 0, y: 1.5, z: 0 };
@@ -1193,8 +1182,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         );
 
         if (cfg.isOnline && !isOnlineHost && state === 'playing') {
-          // Convidado P2P (Guest):
-          // 1) Aplica Previsão Local Imediata (0ms) no próprio personagem antes mesmo do pacote ir e voltar da rede
           const snapForPred = latestOnlineSnapRef.current;
           const serverLocalP = snapForPred?.players.find((pl) => pl.id === cfg.localPlayerId);
           if (serverLocalP && snapForPred) {
@@ -1255,7 +1242,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
                 guestPred.facingX = serverLocalP.team === 'right' ? -1 : 1;
               }
 
-              // Pulo imediato (0ms)
               if (inputState.jump && guestPred.y <= 0.06) {
                 const jumpStat = cfg.localStats?.jump ?? serverLocalP.stats?.jump ?? 75;
                 guestPred.vy = 8.4 + (jumpStat / 100) * 1.6;
@@ -1281,7 +1267,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
                 }
               }
 
-              // Ações imediatas (0ms) nos botões de ataque, levantamento, recepção e mergulho
               const localRigEntry = playerRigs.get(cfg.localPlayerId);
               if (inputState.spike) {
                 guestPred.anim = 'spike';
@@ -1326,7 +1311,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               }
             }
 
-            // Reconciliação suave quando chega novo pacote autoritativo do Host
             if (snapForPred.tick !== guestPred.lastReconciledTick) {
               guestPred.lastReconciledTick = snapForPred.tick;
               const errX = serverLocalP.x - guestPred.x;
@@ -1348,7 +1332,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
             }
           }
 
-          // 2) Envia inputs ao Host em 0ms sempre que qualquer botão ou direção mudar (e a 45 Hz contínuo)
           onlineInputTimer += simDt;
           const moveChanged =
             Math.abs(inputState.moveX - lastSentMoveX) > 0.05 ||
@@ -1532,7 +1515,7 @@ export const GameViewport: React.FC<GameViewportProps> = ({
           } else {
             if (state === 'playing') {
               localWorld.setPlayerInput(cfg.localPlayerId, inputState);
-              if (isOnlineHost) {
+              if (isOnlineHost && latestRemoteInputsRef.current) {
                 for (const [remotePlayerId, remoteInp] of latestRemoteInputsRef.current.entries()) {
                   if (remotePlayerId !== cfg.localPlayerId) {
                     localWorld.setPlayerInput(remotePlayerId, remoteInp);
@@ -1549,11 +1532,10 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               const snap = localWorld.step(PHYSICS.FIXED_DT);
               currentSnapshot = snap;
 
-              // Limpa gatilhos discretos de 1 tick SOMENTE após localWorld.step() consumi-los de fato
               if (steps === 0 && state === 'playing') {
                 localLatchedInput = clearConsumedEdgeTriggers(inputState);
                 localWorld.setPlayerInput(cfg.localPlayerId, localLatchedInput);
-                if (isOnlineHost) {
+                if (isOnlineHost && latestRemoteInputsRef.current) {
                   for (const [remotePlayerId, remoteInp] of latestRemoteInputsRef.current.entries()) {
                     if (remotePlayerId !== cfg.localPlayerId) {
                       const cleaned = clearConsumedEdgeTriggers(remoteInp);
@@ -1631,7 +1613,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               dispatchSnapshotUiUpdates(currentSnapshot, state, cfg);
             }
 
-            // Host P2P envia pacotes compactos de estado a 45 Hz (~22ms) para reduzir latência percebida do convidado
             if (isOnlineHost && currentSnapshot && state === 'playing') {
               onlineHostStateTimer += simDt;
               if (
@@ -1655,7 +1636,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       return { inputState: localLatchedInput ?? inputState, replayFrameActive };
     };
 
-    // Heartbeat dedicado (20ms) para manter a física do Host e a sincronização P2P fluidas
     const simHeartbeatId = window.setInterval(() => {
       if (disposed || screenStateRef.current !== 'playing') return;
       const now = performance.now();
@@ -1683,12 +1663,10 @@ export const GameViewport: React.FC<GameViewportProps> = ({
 
       const { inputState, replayFrameActive } = advanceGameplaySimulation(now);
 
-      // Sincroniza malhas Three.js com o Snapshot atual (quando não está renderizando frame de replay)
       if (currentSnapshot && !replayFrameActive) {
         const snap = currentSnapshot;
         const ball = snap.ball;
 
-        // Interpolação suave para elementos remotos online
         const lerpAlpha = cfg.isOnline ? 1 - Math.exp(-24 * dt) : 1;
         builtArena.ballMesh.position.x = THREE.MathUtils.lerp(builtArena.ballMesh.position.x, ball.x, lerpAlpha);
         builtArena.ballMesh.position.y = THREE.MathUtils.lerp(builtArena.ballMesh.position.y, ball.y, lerpAlpha);
@@ -1696,13 +1674,11 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         _ballQuat.set(ball.rx, ball.ry, ball.rz, ball.rw);
         builtArena.ballMesh.quaternion.slerp(_ballQuat, lerpAlpha);
 
-        // Sombra de contato da bola
         builtArena.ballShadow.position.x = builtArena.ballMesh.position.x;
         builtArena.ballShadow.position.z = builtArena.ballMesh.position.z;
         const bShadowScale = Math.max(0.38, 1 - builtArena.ballMesh.position.y * 0.08);
         builtArena.ballShadow.scale.setScalar(bShadowScale);
 
-        // Marcador preditivo parabólico de queda (onde a bola vai atingir o chão)
         const g = Math.abs(PHYSICS.GRAVITY);
         const hAboveFloor = Math.max(0, ball.y - PHYSICS.BALL_RADIUS);
         const timeToGround = (ball.vy + Math.sqrt(ball.vy * ball.vy + 2 * g * hAboveFloor)) / g;
@@ -1727,7 +1703,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
           builtArena.aimReticle.visible = false;
         }
 
-        // Remove rigs antigos que não existem mais no snapshot atual (evita duplicatas entre preview/online)
         const activeIds = new Set(snap.players.map((pl) => pl.id));
         for (const [id, entry] of playerRigs.entries()) {
           if (!activeIds.has(id)) {
@@ -1736,7 +1711,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
           }
         }
 
-        // Atualiza personagens
         for (const p of snap.players) {
           let entry = playerRigs.get(p.id);
           if (!entry || entry.characterId !== p.characterId || entry.team !== p.team) {
@@ -1758,7 +1732,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
           const targetAnim = useGuestPrediction ? guestPred.anim : p.anim;
           const targetActionState = useGuestPrediction ? guestPred.actionState : p.actionState;
 
-          // Jogador local sempre responde sem atraso de interpolação (1.0); oponente remoto suaviza
           const playerLerpAlpha = isLocalPlayer ? 1 : lerpAlpha;
           entry.rig.root.position.x = THREE.MathUtils.lerp(entry.rig.root.position.x, targetX, playerLerpAlpha);
           entry.rig.root.position.y = THREE.MathUtils.lerp(entry.rig.root.position.y, targetY, playerLerpAlpha);
@@ -1787,7 +1760,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
             entry.animator.getResolvedState(),
           );
 
-          // Atualiza barra Super Attack + timer regressivo de 5.0s + Barra de Força de Saque (Hold to Charge) via DOM refs (zero setState a 60Hz!)
           if (isLocalPlayer) {
             const pct = Math.min(1, p.ultimateCharge / PHYSICS.ULTIMATE_MAX);
             if (ultimateFillRef.current) {
@@ -1811,7 +1783,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               }
             }
 
-            // Feedback Visual Minimalista do Saque (visível APENAS na hora do saque local; desaparece imediatamente ao lançar a bola)
             const isTrainingMachine =
               cfg.mode === 'training_spike' || cfg.mode === 'training_receive';
             const isLocalServeTurn =
@@ -1862,7 +1833,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               }
             }
 
-            // Brilho cromático dinâmico na Bola 3D enquanto carrega o saque + Cor da Bola Equipada na Loja Beta
             const ballMat = builtArena.ballMesh.material as THREE.MeshStandardMaterial | THREE.MeshToonMaterial;
             if (ballMat) {
               const equippedBallHex = cfg.equippedBallColor || '#FFFFFF';
@@ -1899,7 +1869,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               }
             }
 
-            // Aplica Skin/Uniforme equipado na Loja Beta ao personagem local 3D
             const outfitId = cfg.equippedOutfitId;
             const [jerseyM, shortsM, accentM] = entry.rig.hitFlashMaterials;
             if (outfitId && outfitId !== 'outfit_default') {
@@ -1934,14 +1903,12 @@ export const GameViewport: React.FC<GameViewportProps> = ({
           }
         }
 
-        // Atualiza rastro customizado da Bola Equipada na Loja Beta e VFX em pool
         vfx.setCustomTrailColor(cfg.equippedBallTrailColor ?? cfg.equippedBallColor);
         const ballSpeed = Math.hypot(ball.vx, ball.vy, ball.vz);
         vfx.update(dt, builtArena.ballMesh.position.x, builtArena.ballMesh.position.y, builtArena.ballMesh.position.z, ballSpeed, ball.activeUltimate);
         const crowdExcite = snap.phase === 'point_freeze' || snap.phase === 'finished' ? 1.85 : ball.activeUltimate ? 1.5 : 1.0;
         builtArena.updateCrowd?.(elapsed, crowdExcite);
 
-        // Dispara callback discreto apenas quando o placar/fase/treino/stun mudar
         if (state === 'playing' || (state === 'guide' && cfg.isOnline)) {
           const key = `${snap.score.left}-${snap.score.right}-${ball.touchesLeft}-${ball.touchesRight}-${snap.phase}`;
           if (key !== lastReportedScoreKey) {
@@ -1983,7 +1950,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         }
       }
 
-      // Identifica o jogador ativo para Foco Duplo + Foley de passos + Torcida dinâmica
       let activePlayer = currentSnapshot?.players.find((p) => p.id === cfg.localPlayerId);
       if (!replayFrameActive && currentSnapshot && currentSnapshot.players.length > 0) {
         const bx = builtArena.ballMesh.position.x;
@@ -2052,7 +2018,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
           ? guestPred.actionState
           : (activePlayer?.actionState ?? 'idle');
 
-      // Câmera Dinâmica 2.5D: Foco Duplo + Zoom Contextual de FOV + Screen Shake Escalonado + Flash
       const feel = gameFeel.updateCameraAndFeel(dt, elapsed, {
         aspect: camera.aspect,
         phase: currentSnapshot?.phase ?? 'serve_wait',
@@ -2090,7 +2055,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       }
     };
 
-    // Cria rigs iniciais imediatamente para que o primeiro paint já exiba você atrás da linha (saque fora) + Levantador junto à rede e o rival na quadra
     const spawnInitialPreviewRigs = () => {
       const previewLeft = buildAnimeCharacter(matchConfigRef.current.localCharacterId, 'left');
       previewLeft.root.position.set(-(COURT.HALF_WIDTH + 0.85), 0, 0);
@@ -2146,7 +2110,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     };
     spawnInitialPreviewRigs();
 
-    // Renderiza frame 0 imediatamente para evitar tela escura na pintura inicial
     if (screenStateRef.current === 'title') {
       camera.position.set(0, 5.4, 28.0);
       camera.lookAt(0, 1.65, 0);
