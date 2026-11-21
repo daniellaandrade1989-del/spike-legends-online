@@ -1,0 +1,772 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidCharacter(charId) {
+      return charId is string && charId.size() <= 16 && charId in ['akira', 'ren', 'yuki', 'hana', 'kai'];
+    }
+
+    function isValidMode(mode) {
+      return mode is string && mode.size() <= 16 && mode in ['1v1', '2v2', '3v3', '4v4', 'practice'];
+    }
+
+    function isValidAudioMimeType(mime) {
+      return mime is string &&
+        mime.size() >= 3 &&
+        mime.size() <= 64 &&
+        mime in [
+          'audio/mpeg',
+          'audio/mp3',
+          'audio/wav',
+          'audio/x-wav',
+          'audio/wave',
+          'audio/ogg',
+          'application/ogg',
+          'video/mp4',
+          'video/webm'
+        ];
+    }
+
+    function isValidAudioCategory(cat) {
+      return cat is string &&
+        cat.size() >= 3 &&
+        cat.size() <= 32 &&
+        cat in [
+          'MenuMusic',
+          'TitleBGM',
+          'LobbyBGM',
+          'TitleAnimation',
+          'SplashAnimation',
+          'CrowdAmbient',
+          'ShoeSqueaks',
+          'StageBGM',
+          'SFX'
+        ];
+    }
+
+    // 3. Validation Blueprint: PublicProfile
+    function isValidPublicProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid',
+          'displayName',
+          'avatarCharacterId',
+          'flagCode',
+          'level',
+          'elo',
+          'wins',
+          'losses',
+          'spikes',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'avatarCharacterId',
+          'flagCode',
+          'level',
+          'elo',
+          'wins',
+          'losses',
+          'spikes',
+          'updatedAt'
+        ]) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 24 &&
+        isValidCharacter(data.avatarCharacterId) &&
+        data.flagCode is string && data.flagCode.size() >= 2 && data.flagCode.size() <= 4 &&
+        data.level is int && data.level >= 1 && data.level <= 500 &&
+        data.elo is int && data.elo >= 0 && data.elo <= 5000 &&
+        data.wins is int && data.wins >= 0 && data.wins <= 100000 &&
+        data.losses is int && data.losses >= 0 && data.losses <= 100000 &&
+        data.spikes is int && data.spikes >= 0 && data.spikes <= 1000000 &&
+        data.updatedAt == request.time;
+    }
+
+    // 4. Validation Blueprint: UserAccount (PII Isolated)
+    function isValidUserAccount(data, userId) {
+      return data.keys().hasAll([
+          'uid',
+          'email',
+          'soundMuted',
+          'musicVolume',
+          'sfxVolume',
+          'colorblindMode',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'email',
+          'soundMuted',
+          'musicVolume',
+          'sfxVolume',
+          'colorblindMode',
+          'updatedAt'
+        ]) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.email == request.auth.token.email &&
+        data.soundMuted is bool &&
+        data.musicVolume is number && data.musicVolume >= 0 && data.musicVolume <= 1 &&
+        data.sfxVolume is number && data.sfxVolume >= 0 && data.sfxVolume <= 1 &&
+        data.colorblindMode is bool &&
+        data.updatedAt == request.time;
+    }
+
+    // 5. Validation Blueprint: MatchRecord (Immutable)
+    function isValidMatchRecord(data, matchId) {
+      return data.keys().hasAll([
+          'matchId',
+          'ownerUid',
+          'mode',
+          'arenaId',
+          'characterId',
+          'teamScore',
+          'opponentScore',
+          'won',
+          'spikesCount',
+          'blocksCount',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'matchId',
+          'ownerUid',
+          'mode',
+          'arenaId',
+          'characterId',
+          'teamScore',
+          'opponentScore',
+          'won',
+          'spikesCount',
+          'blocksCount',
+          'createdAt'
+        ]) &&
+        data.matchId is string && data.matchId.size() >= 1 && data.matchId.size() <= 128 &&
+        data.matchId == matchId &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        data.ownerUid == request.auth.uid &&
+        isValidMode(data.mode) &&
+        data.arenaId is string && data.arenaId.size() >= 2 && data.arenaId.size() <= 32 &&
+        isValidCharacter(data.characterId) &&
+        data.teamScore is int && data.teamScore >= 0 && data.teamScore <= 99 &&
+        data.opponentScore is int && data.opponentScore >= 0 && data.opponentScore <= 99 &&
+        data.won is bool &&
+        data.spikesCount is int && data.spikesCount >= 0 && data.spikesCount <= 500 &&
+        data.blocksCount is int && data.blocksCount >= 0 && data.blocksCount <= 500 &&
+        data.createdAt == request.time;
+    }
+
+    // 6. Validation Blueprint: GlobalAudioSettings (globalSettings/audio)
+    function isValidGlobalAudioSettings(data, settingId) {
+      return data.keys().hasAll([
+          'settingId',
+          'menuMusicUrl',
+          'crowdAmbientUrl',
+          'shoeSqueakUrls',
+          'crowdTrackId',
+          'assignments',
+          'sfxAssignments',
+          'trackIds',
+          'fadeOutSec',
+          'fadeInSec',
+          'crowdVolume',
+          'shoeSqueakVolume',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'settingId',
+          'menuMusicUrl',
+          'crowdAmbientUrl',
+          'shoeSqueakUrls',
+          'crowdTrackId',
+          'assignments',
+          'sfxAssignments',
+          'trackIds',
+          'fadeOutSec',
+          'fadeInSec',
+          'crowdVolume',
+          'shoeSqueakVolume',
+          'updatedAt'
+        ]) &&
+        data.settingId is string && data.settingId.size() >= 1 && data.settingId.size() <= 64 &&
+        data.settingId == settingId &&
+        data.menuMusicUrl is string && data.menuMusicUrl.size() <= 1024 &&
+        data.crowdAmbientUrl is string && data.crowdAmbientUrl.size() <= 1024 &&
+        data.shoeSqueakUrls is list && data.shoeSqueakUrls.size() <= 32 &&
+        (data.shoeSqueakUrls.size() == 0 || (data.shoeSqueakUrls[0] is string && data.shoeSqueakUrls[0].size() <= 1024)) &&
+        data.crowdTrackId is string && data.crowdTrackId.size() <= 128 &&
+        data.assignments is map && data.assignments.size() <= 16 &&
+        data.sfxAssignments is map && data.sfxAssignments.size() <= 16 &&
+        data.trackIds is list && data.trackIds.size() <= 64 &&
+        (data.trackIds.size() == 0 || (data.trackIds[0] is string && data.trackIds[0].size() <= 128)) &&
+        data.fadeOutSec is number && data.fadeOutSec >= 0.05 && data.fadeOutSec <= 5.0 &&
+        data.fadeInSec is number && data.fadeInSec >= 0.05 && data.fadeInSec <= 5.0 &&
+        data.crowdVolume is number && data.crowdVolume >= 0 && data.crowdVolume <= 1 &&
+        data.shoeSqueakVolume is number && data.shoeSqueakVolume >= 0 && data.shoeSqueakVolume <= 1 &&
+        data.updatedAt == request.time;
+    }
+
+    // 7. Validation Blueprint: AudioConfig (Cloud Audio URLs & Slot Assignments)
+    function isValidAudioConfig(data, configId) {
+      return data.keys().hasAll([
+          'configId',
+          'menuMusicUrl',
+          'crowdAmbientUrl',
+          'shoeSqueakUrls',
+          'crowdTrackId',
+          'assignments',
+          'sfxAssignments',
+          'fadeOutSec',
+          'fadeInSec',
+          'crowdVolume',
+          'shoeSqueakVolume',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'configId',
+          'menuMusicUrl',
+          'crowdAmbientUrl',
+          'shoeSqueakUrls',
+          'crowdTrackId',
+          'assignments',
+          'sfxAssignments',
+          'fadeOutSec',
+          'fadeInSec',
+          'crowdVolume',
+          'shoeSqueakVolume',
+          'updatedAt'
+        ]) &&
+        data.configId is string && data.configId.size() >= 1 && data.configId.size() <= 64 &&
+        data.configId == configId &&
+        data.menuMusicUrl is string && data.menuMusicUrl.size() <= 1024 &&
+        data.crowdAmbientUrl is string && data.crowdAmbientUrl.size() <= 1024 &&
+        data.shoeSqueakUrls is list && data.shoeSqueakUrls.size() <= 32 &&
+        (data.shoeSqueakUrls.size() == 0 || (data.shoeSqueakUrls[0] is string && data.shoeSqueakUrls[0].size() <= 1024)) &&
+        data.crowdTrackId is string && data.crowdTrackId.size() <= 128 &&
+        data.assignments is map && data.assignments.size() <= 16 &&
+        data.sfxAssignments is map && data.sfxAssignments.size() <= 16 &&
+        data.fadeOutSec is number && data.fadeOutSec >= 0.05 && data.fadeOutSec <= 5.0 &&
+        data.fadeInSec is number && data.fadeInSec >= 0.05 && data.fadeInSec <= 5.0 &&
+        data.crowdVolume is number && data.crowdVolume >= 0 && data.crowdVolume <= 1 &&
+        data.shoeSqueakVolume is number && data.shoeSqueakVolume >= 0 && data.shoeSqueakVolume <= 1 &&
+        data.updatedAt == request.time;
+    }
+
+    // 8. Validation Blueprint: AudioTrack (Metadata & Cloud Storage URL)
+    function isValidAudioTrack(data, trackId) {
+      return data.keys().hasAll([
+          'id',
+          'name',
+          'mimeType',
+          'sizeBytes',
+          'createdAtMs',
+          'category',
+          'url',
+          'storageUrl',
+          'chunkCount',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'name',
+          'mimeType',
+          'sizeBytes',
+          'createdAtMs',
+          'category',
+          'url',
+          'storageUrl',
+          'chunkCount',
+          'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.id == trackId &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        isValidAudioMimeType(data.mimeType) &&
+        data.sizeBytes is int && data.sizeBytes >= 1 && data.sizeBytes <= 36700160 &&
+        data.createdAtMs is int && data.createdAtMs >= 0 &&
+        isValidAudioCategory(data.category) &&
+        data.url is string && data.url.size() >= 1 && data.url.size() <= 1024 &&
+        data.storageUrl is string && data.storageUrl.size() >= 1 && data.storageUrl.size() <= 1024 &&
+        data.chunkCount is int && data.chunkCount >= 1 && data.chunkCount <= 64 &&
+        data.updatedAt == request.time;
+    }
+
+    // 9. Validation Blueprint: AudioBlobChunk (Stateless Cloud Run Binary Persistence)
+    function isValidAudioBlobChunk(data, chunkId) {
+      return data.keys().hasAll([
+          'chunkId',
+          'trackId',
+          'chunkIndex',
+          'totalChunks',
+          'mimeType',
+          'dataBase64',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'chunkId',
+          'trackId',
+          'chunkIndex',
+          'totalChunks',
+          'mimeType',
+          'dataBase64',
+          'createdAt'
+        ]) &&
+        data.chunkId is string && data.chunkId.size() >= 1 && data.chunkId.size() <= 128 &&
+        data.chunkId == chunkId &&
+        isValidId(data.trackId) &&
+        data.chunkIndex is int && data.chunkIndex >= 0 && data.chunkIndex < 64 &&
+        data.totalChunks is int && data.totalChunks >= 1 && data.totalChunks <= 64 &&
+        isValidAudioMimeType(data.mimeType) &&
+        data.dataBase64 is string && data.dataBase64.size() >= 1 && data.dataBase64.size() <= 750000 &&
+        data.createdAt == request.time;
+    }
+
+    // 10. Validation Blueprint: PlayerEconomy (/playerEconomy/{userId})
+    function isValidPlayerEconomy(data, userId) {
+      return data.keys().hasAll([
+          'uid',
+          'playerCoins',
+          'save',
+          'updatedAtMs',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'playerCoins',
+          'save',
+          'updatedAtMs',
+          'updatedAt'
+        ]) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.uid == userId &&
+        data.playerCoins is int && data.playerCoins >= 0 && data.playerCoins <= 10000000 &&
+        data.save is map && data.save.size() <= 32 &&
+        data.updatedAtMs is int && data.updatedAtMs >= 0 &&
+        data.updatedAt == request.time;
+    }
+
+    // 11. Validation Blueprint: AnalyticsUser (/analyticsUsers/{userId})
+    function isValidAnalyticsUser(data, userId) {
+      return data.keys().hasAll([
+          'uid',
+          'displayName',
+          'email',
+          'matchesPlayed',
+          'totalSessionSeconds',
+          'sessionCount',
+          'ratingStars',
+          'ratingComment',
+          'updatedAtMs',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'email',
+          'matchesPlayed',
+          'totalSessionSeconds',
+          'sessionCount',
+          'ratingStars',
+          'ratingComment',
+          'updatedAtMs',
+          'updatedAt'
+        ]) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.uid == userId &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 64 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.matchesPlayed is int && data.matchesPlayed >= 0 && data.matchesPlayed <= 1000000 &&
+        data.totalSessionSeconds is int && data.totalSessionSeconds >= 0 && data.totalSessionSeconds <= 100000000 &&
+        data.sessionCount is int && data.sessionCount >= 0 && data.sessionCount <= 1000000 &&
+        data.ratingStars is int && data.ratingStars >= 0 && data.ratingStars <= 5 &&
+        data.ratingComment is string && data.ratingComment.size() <= 300 &&
+        data.updatedAtMs is int && data.updatedAtMs >= 0 &&
+        data.updatedAt == request.time;
+    }
+
+    // 12. Validation Blueprint: GameMediaConfig (/config/{configId})
+    function isValidGameMediaConfig(data, configId) {
+      return data.keys().hasAll([
+          'configId',
+          'titleBgmUrl',
+          'lobbyBgmUrl',
+          'titleAnimationUrl',
+          'splashAnimationUrl',
+          'titleBgmTrackId',
+          'lobbyBgmTrackId',
+          'titleAnimationTrackId',
+          'splashAnimationTrackId',
+          'updatedAtMs',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'configId',
+          'titleBgmUrl',
+          'lobbyBgmUrl',
+          'titleAnimationUrl',
+          'splashAnimationUrl',
+          'titleBgmTrackId',
+          'lobbyBgmTrackId',
+          'titleAnimationTrackId',
+          'splashAnimationTrackId',
+          'updatedAtMs',
+          'updatedAt'
+        ]) &&
+        data.configId is string && data.configId.size() >= 1 && data.configId.size() <= 64 &&
+        data.configId == configId &&
+        data.titleBgmUrl is string && data.titleBgmUrl.size() <= 1024 &&
+        data.lobbyBgmUrl is string && data.lobbyBgmUrl.size() <= 1024 &&
+        data.titleAnimationUrl is string && data.titleAnimationUrl.size() <= 1024 &&
+        data.splashAnimationUrl is string && data.splashAnimationUrl.size() <= 1024 &&
+        data.titleBgmTrackId is string && data.titleBgmTrackId.size() <= 128 &&
+        data.lobbyBgmTrackId is string && data.lobbyBgmTrackId.size() <= 128 &&
+        data.titleAnimationTrackId is string && data.titleAnimationTrackId.size() <= 128 &&
+        data.splashAnimationTrackId is string && data.splashAnimationTrackId.size() <= 128 &&
+        data.updatedAtMs is int && data.updatedAtMs >= 0 &&
+        data.updatedAt == request.time;
+    }
+
+    // Collection: /publicProfiles/{userId}
+    match /publicProfiles/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && existing().elo >= 0 && existing().level >= 1;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        userId == request.auth.uid &&
+        isValidPublicProfile(incoming(), userId) &&
+        incoming().level == 1 &&
+        incoming().elo == 1000 &&
+        incoming().wins == 0 &&
+        incoming().losses == 0 &&
+        incoming().spikes == 0;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        userId == request.auth.uid &&
+        isValidPublicProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        (
+          // Action 1: Update profile identity (nickname, character, flag)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName',
+              'avatarCharacterId',
+              'flagCode',
+              'updatedAt'
+            ]) &&
+            incoming().level == existing().level &&
+            incoming().elo == existing().elo &&
+            incoming().wins == existing().wins &&
+            incoming().losses == existing().losses &&
+            incoming().spikes == existing().spikes
+          ) ||
+          // Action 2: Record completed match stats progression
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'level',
+              'elo',
+              'wins',
+              'losses',
+              'spikes',
+              'updatedAt'
+            ]) &&
+            incoming().displayName == existing().displayName &&
+            incoming().avatarCharacterId == existing().avatarCharacterId &&
+            incoming().flagCode == existing().flagCode &&
+            incoming().level >= existing().level &&
+            incoming().level <= existing().level + 2 &&
+            incoming().wins >= existing().wins &&
+            incoming().wins <= existing().wins + 1 &&
+            incoming().losses >= existing().losses &&
+            incoming().losses <= existing().losses + 1 &&
+            incoming().spikes >= existing().spikes &&
+            incoming().spikes <= existing().spikes + 100 &&
+            incoming().elo >= existing().elo - 64 &&
+            incoming().elo <= existing().elo + 64
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // Collection: /userAccounts/{userId} (PII Isolated — strictly owner only)
+    match /userAccounts/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && userId == request.auth.uid;
+      allow list: if false;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        userId == request.auth.uid &&
+        isValidUserAccount(incoming(), userId);
+
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        userId == request.auth.uid &&
+        isValidUserAccount(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'soundMuted',
+          'musicVolume',
+          'sfxVolume',
+          'colorblindMode',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /matchHistory/{matchId}
+    match /matchHistory/{matchId} {
+      allow get: if isVerifiedUser() && isValidId(matchId) && existing().ownerUid == request.auth.uid;
+      allow list: if isVerifiedUser() && existing().ownerUid == request.auth.uid;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(matchId) &&
+        isValidMatchRecord(incoming(), matchId) &&
+        exists(/databases/$(database)/documents/publicProfiles/$(request.auth.uid));
+
+      allow update, delete: if false;
+    }
+
+    // Collection: /globalSettings/{settingId}
+    match /globalSettings/{settingId} {
+      allow get: if isValidId(settingId) && settingId == 'audio';
+      allow list: if existing().settingId == 'audio';
+
+      allow create: if isValidId(settingId) &&
+        settingId == 'audio' &&
+        isValidGlobalAudioSettings(incoming(), settingId);
+
+      allow update: if isValidId(settingId) &&
+        settingId == 'audio' &&
+        isValidGlobalAudioSettings(incoming(), settingId) &&
+        incoming().settingId == existing().settingId &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'settingId',
+          'menuMusicUrl',
+          'crowdAmbientUrl',
+          'shoeSqueakUrls',
+          'crowdTrackId',
+          'assignments',
+          'sfxAssignments',
+          'trackIds',
+          'fadeOutSec',
+          'fadeInSec',
+          'crowdVolume',
+          'shoeSqueakVolume',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /audioConfig/{configId}
+    match /audioConfig/{configId} {
+      allow get: if isValidId(configId) && configId == 'global';
+      allow list: if existing().configId == 'global';
+
+      allow create: if isValidId(configId) &&
+        configId == 'global' &&
+        isValidAudioConfig(incoming(), configId);
+
+      allow update: if isValidId(configId) &&
+        configId == 'global' &&
+        isValidAudioConfig(incoming(), configId) &&
+        incoming().configId == existing().configId &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'configId',
+          'menuMusicUrl',
+          'crowdAmbientUrl',
+          'shoeSqueakUrls',
+          'crowdTrackId',
+          'assignments',
+          'sfxAssignments',
+          'fadeOutSec',
+          'fadeInSec',
+          'crowdVolume',
+          'shoeSqueakVolume',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /audioTracks/{trackId}
+    match /audioTracks/{trackId} {
+      allow get: if isValidId(trackId);
+      allow list: if existing().sizeBytes >= 1 && existing().chunkCount >= 1;
+
+      allow create: if isValidId(trackId) &&
+        isValidAudioTrack(incoming(), trackId);
+
+      allow update: if isValidId(trackId) &&
+        isValidAudioTrack(incoming(), trackId) &&
+        incoming().id == existing().id &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'id',
+          'name',
+          'mimeType',
+          'sizeBytes',
+          'createdAtMs',
+          'category',
+          'url',
+          'storageUrl',
+          'chunkCount',
+          'updatedAt'
+        ]);
+
+      allow delete: if isValidId(trackId) && existing().sizeBytes >= 1;
+    }
+
+    // Collection: /audioBlobs/{chunkId}
+    match /audioBlobs/{chunkId} {
+      allow get: if isValidId(chunkId);
+      allow list: if existing().chunkIndex >= 0 && existing().totalChunks >= 1;
+
+      allow create: if isValidId(chunkId) &&
+        isValidAudioBlobChunk(incoming(), chunkId);
+
+      allow update: if isValidId(chunkId) &&
+        isValidAudioBlobChunk(incoming(), chunkId) &&
+        incoming().chunkId == existing().chunkId &&
+        incoming().trackId == existing().trackId &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'chunkId',
+          'trackId',
+          'chunkIndex',
+          'totalChunks',
+          'mimeType',
+          'dataBase64',
+          'createdAt'
+        ]);
+
+      allow delete: if isValidId(chunkId) && existing().totalChunks >= 1;
+    }
+
+    // Collection: /playerEconomy/{userId}
+    match /playerEconomy/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if existing().playerCoins >= 0;
+
+      allow create: if isValidId(userId) &&
+        isValidPlayerEconomy(incoming(), userId);
+
+      allow update: if isValidId(userId) &&
+        isValidPlayerEconomy(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'uid',
+          'playerCoins',
+          'save',
+          'updatedAtMs',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /analyticsUsers/{userId}
+    match /analyticsUsers/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if existing().updatedAtMs >= 0;
+
+      allow create: if isValidId(userId) &&
+        isValidAnalyticsUser(incoming(), userId);
+
+      allow update: if isValidId(userId) &&
+        isValidAnalyticsUser(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'uid',
+          'displayName',
+          'email',
+          'matchesPlayed',
+          'totalSessionSeconds',
+          'sessionCount',
+          'ratingStars',
+          'ratingComment',
+          'updatedAtMs',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /config/{configId} (config/gameMedia: titleBGM, lobbyBGM, titleAnimation .mp4, splashAnimation .mp4)
+    match /config/{configId} {
+      allow get: if isValidId(configId) && configId == 'gameMedia';
+      allow list: if existing().configId == 'gameMedia';
+
+      allow create: if isValidId(configId) &&
+        configId == 'gameMedia' &&
+        isValidGameMediaConfig(incoming(), configId);
+
+      allow update: if isValidId(configId) &&
+        configId == 'gameMedia' &&
+        isValidGameMediaConfig(incoming(), configId) &&
+        incoming().configId == existing().configId &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'configId',
+          'titleBgmUrl',
+          'lobbyBgmUrl',
+          'titleAnimationUrl',
+          'splashAnimationUrl',
+          'titleBgmTrackId',
+          'lobbyBgmTrackId',
+          'titleAnimationTrackId',
+          'splashAnimationTrackId',
+          'updatedAtMs',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /rooms/{roomCode} e subcoleções (offerCandidates, answerCandidates)
+    match /rooms/{roomCode}/{document=**} {
+      allow read, write: if true;
+    }
+
+    // Collection: /webrtcRooms/{roomCode} e subcoleções
+    match /webrtcRooms/{roomCode}/{document=**} {
+      allow read, write: if true;
+    }
+
+    // Collection: /test/{docId} (Startup connectivity probe)
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+      allow list, create, update, delete: if false;
+    }
+  }
+}

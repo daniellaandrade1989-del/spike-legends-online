@@ -1,0 +1,914 @@
+{
+  "entities": {
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Publicly visible player profile and competitive statistics for leaderboards and lobbies.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Player display nickname.",
+          "minLength": 2,
+          "maxLength": 24
+        },
+        "avatarCharacterId": {
+          "type": "string",
+          "description": "Selected character ID.",
+          "enum": ["akira", "ren", "yuki", "hana", "kai"]
+        },
+        "flagCode": {
+          "type": "string",
+          "description": "Two-letter country flag code.",
+          "minLength": 2,
+          "maxLength": 4
+        },
+        "level": {
+          "type": "integer",
+          "description": "Player progression level (1 to 500)."
+        },
+        "elo": {
+          "type": "integer",
+          "description": "Competitive Elo rating (0 to 5000)."
+        },
+        "wins": {
+          "type": "integer",
+          "description": "Total matches won."
+        },
+        "losses": {
+          "type": "integer",
+          "description": "Total matches lost."
+        },
+        "spikes": {
+          "type": "integer",
+          "description": "Total successful spikes landed."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last profile update."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "avatarCharacterId",
+        "flagCode",
+        "level",
+        "elo",
+        "wins",
+        "losses",
+        "spikes",
+        "updatedAt"
+      ]
+    },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Private user account data and settings isolated from public profiles.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Authenticated user email address.",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "soundMuted": {
+          "type": "boolean",
+          "description": "Whether game audio is muted."
+        },
+        "musicVolume": {
+          "type": "number",
+          "description": "Preferred music volume (0 to 1)."
+        },
+        "sfxVolume": {
+          "type": "number",
+          "description": "Preferred sound effects volume (0 to 1)."
+        },
+        "colorblindMode": {
+          "type": "boolean",
+          "description": "High-contrast indicator mode."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last settings update."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "soundMuted",
+        "musicVolume",
+        "sfxVolume",
+        "colorblindMode",
+        "updatedAt"
+      ]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Immutable completed match summary record owned by a player.",
+      "type": "object",
+      "properties": {
+        "matchId": {
+          "type": "string",
+          "description": "Unique match record identifier.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "UID of the player who recorded this match.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "mode": {
+          "type": "string",
+          "description": "Match mode played.",
+          "enum": ["1v1", "2v2", "3v3", "4v4", "practice"]
+        },
+        "arenaId": {
+          "type": "string",
+          "description": "Arena map identifier.",
+          "minLength": 2,
+          "maxLength": 32
+        },
+        "characterId": {
+          "type": "string",
+          "description": "Character used by the player.",
+          "enum": ["akira", "ren", "yuki", "hana", "kai"]
+        },
+        "teamScore": {
+          "type": "integer",
+          "description": "Final score of the player's team."
+        },
+        "opponentScore": {
+          "type": "integer",
+          "description": "Final score of the opposing team."
+        },
+        "won": {
+          "type": "boolean",
+          "description": "Whether the player's team won the match."
+        },
+        "spikesCount": {
+          "type": "integer",
+          "description": "Number of spikes executed by the player."
+        },
+        "blocksCount": {
+          "type": "integer",
+          "description": "Number of blocks executed by the player."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the match record was created."
+        }
+      },
+      "required": [
+        "matchId",
+        "ownerUid",
+        "mode",
+        "arenaId",
+        "characterId",
+        "teamScore",
+        "opponentScore",
+        "won",
+        "spikesCount",
+        "blocksCount",
+        "createdAt"
+      ]
+    },
+    "AudioConfig": {
+      "title": "AudioConfig",
+      "description": "Global custom audio configuration storing Cloud Storage URLs and slot mappings for MenuMusic, CrowdAmbient, Stage BGMs, and ShoeSqueaks.",
+      "type": "object",
+      "properties": {
+        "configId": {
+          "type": "string",
+          "description": "Configuration document identifier (global).",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "menuMusicUrl": {
+          "type": "string",
+          "description": "Public Cloud Storage or stream URL for MenuMusic (MenuTheme).",
+          "maxLength": 1024
+        },
+        "crowdAmbientUrl": {
+          "type": "string",
+          "description": "Public Cloud Storage or stream URL for CrowdAmbient loop.",
+          "maxLength": 1024
+        },
+        "shoeSqueakUrls": {
+          "type": "array",
+          "description": "List of public Cloud Storage or stream URLs for ShoeSqueaks samples."
+        },
+        "crowdTrackId": {
+          "type": "string",
+          "description": "Track ID assigned to CrowdAmbience loop.",
+          "maxLength": 128
+        },
+        "assignments": {
+          "type": "object",
+          "description": "Mapping of scene slots (MenuTheme, Stage1_BGM..Stage7_BGM) to track IDs."
+        },
+        "sfxAssignments": {
+          "type": "object",
+          "description": "Mapping of SFX slots (ShoeSqueaks, ImpactSpike, etc.) to arrays of track IDs."
+        },
+        "fadeOutSec": {
+          "type": "number",
+          "description": "Crossfade out duration in seconds."
+        },
+        "fadeInSec": {
+          "type": "number",
+          "description": "Crossfade in duration in seconds."
+        },
+        "crowdVolume": {
+          "type": "number",
+          "description": "Independent volume slider value for Crowd Ambience (0 to 1)."
+        },
+        "shoeSqueakVolume": {
+          "type": "number",
+          "description": "Independent volume slider value for Shoe Squeaks (0 to 1)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last audio config update."
+        }
+      },
+      "required": [
+        "configId",
+        "menuMusicUrl",
+        "crowdAmbientUrl",
+        "shoeSqueakUrls",
+        "crowdTrackId",
+        "assignments",
+        "sfxAssignments",
+        "fadeOutSec",
+        "fadeInSec",
+        "crowdVolume",
+        "shoeSqueakVolume",
+        "updatedAt"
+      ]
+    },
+    "AudioTrack": {
+      "title": "AudioTrack",
+      "description": "Metadata and Cloud Storage URL for a custom uploaded audio clip (.mp3, .wav, .ogg).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique track identifier.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Original audio file name.",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "Audio or Video MIME type.",
+          "enum": [
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/wave",
+            "audio/ogg",
+            "application/ogg",
+            "video/mp4",
+            "video/webm"
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "File size in bytes."
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "description": "Creation epoch timestamp in milliseconds."
+        },
+        "category": {
+          "type": "string",
+          "description": "Media category (MenuMusic, TitleBGM, LobbyBGM, TitleAnimation, SplashAnimation, CrowdAmbient, ShoeSqueaks, StageBGM, SFX).",
+          "enum": [
+            "MenuMusic",
+            "TitleBGM",
+            "LobbyBGM",
+            "TitleAnimation",
+            "SplashAnimation",
+            "CrowdAmbient",
+            "ShoeSqueaks",
+            "StageBGM",
+            "SFX"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "description": "Public streaming URL for the audio clip.",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "storageUrl": {
+          "type": "string",
+          "description": "Direct Cloud Storage bucket URL or canonical stream path.",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "chunkCount": {
+          "type": "integer",
+          "description": "Number of binary chunks stored in audioBlobs."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when track was stored."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "mimeType",
+        "sizeBytes",
+        "createdAtMs",
+        "category",
+        "url",
+        "storageUrl",
+        "chunkCount",
+        "updatedAt"
+      ]
+    },
+    "AudioBlobChunk": {
+      "title": "AudioBlobChunk",
+      "description": "Cloud-persisted binary audio chunk ensuring stateless Cloud Run instances can stream custom uploaded audio across deploys.",
+      "type": "object",
+      "properties": {
+        "chunkId": {
+          "type": "string",
+          "description": "Chunk document identifier ({trackId}_chunk_{index}).",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "trackId": {
+          "type": "string",
+          "description": "Parent audio track ID.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "chunkIndex": {
+          "type": "integer",
+          "description": "Zero-based index of this chunk."
+        },
+        "totalChunks": {
+          "type": "integer",
+          "description": "Total chunks for the parent audio track."
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "Audio MIME type.",
+          "minLength": 3,
+          "maxLength": 64
+        },
+        "dataBase64": {
+          "type": "string",
+          "description": "Base64-encoded binary slice (<= 700KB).",
+          "minLength": 1,
+          "maxLength": 750000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the chunk was written."
+        }
+      },
+      "required": [
+        "chunkId",
+        "trackId",
+        "chunkIndex",
+        "totalChunks",
+        "mimeType",
+        "dataBase64",
+        "createdAt"
+      ]
+    },
+    "GlobalAudioSettings": {
+      "title": "GlobalAudioSettings",
+      "description": "Global persistent audio settings document (globalSettings/audio) storing Cloud Storage URLs and track IDs across stateless Cloud Run deployments.",
+      "type": "object",
+      "properties": {
+        "settingId": {
+          "type": "string",
+          "description": "Global setting document identifier (audio).",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "menuMusicUrl": {
+          "type": "string",
+          "description": "Public Cloud Storage or stream URL for MenuMusic.",
+          "maxLength": 1024
+        },
+        "crowdAmbientUrl": {
+          "type": "string",
+          "description": "Public Cloud Storage or stream URL for CrowdAmbient.",
+          "maxLength": 1024
+        },
+        "shoeSqueakUrls": {
+          "type": "array",
+          "description": "List of public Cloud Storage or stream URLs for ShoeSqueaks."
+        },
+        "crowdTrackId": {
+          "type": "string",
+          "description": "Track ID assigned to CrowdAmbience.",
+          "maxLength": 128
+        },
+        "assignments": {
+          "type": "object",
+          "description": "Mapping of scene slots to track IDs."
+        },
+        "sfxAssignments": {
+          "type": "object",
+          "description": "Mapping of SFX slots to arrays of track IDs."
+        },
+        "trackIds": {
+          "type": "array",
+          "description": "List of all active custom audio track IDs for deterministic Cloud Run hydration."
+        },
+        "fadeOutSec": {
+          "type": "number",
+          "description": "Crossfade out duration in seconds."
+        },
+        "fadeInSec": {
+          "type": "number",
+          "description": "Crossfade in duration in seconds."
+        },
+        "crowdVolume": {
+          "type": "number",
+          "description": "Crowd ambience default volume (0 to 1)."
+        },
+        "shoeSqueakVolume": {
+          "type": "number",
+          "description": "Shoe squeak default volume (0 to 1)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last update."
+        }
+      },
+      "required": [
+        "settingId",
+        "menuMusicUrl",
+        "crowdAmbientUrl",
+        "shoeSqueakUrls",
+        "crowdTrackId",
+        "assignments",
+        "sfxAssignments",
+        "trackIds",
+        "fadeOutSec",
+        "fadeInSec",
+        "crowdVolume",
+        "shoeSqueakVolume",
+        "updatedAt"
+      ]
+    },
+    "PlayerEconomy": {
+      "title": "PlayerEconomy",
+      "description": "Persistent player RPG attributes, unlocked shop items, and coin balance.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Player identifier.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "playerCoins": {
+          "type": "integer",
+          "description": "Current PlayerCoins balance (0 to 10,000,000)."
+        },
+        "save": {
+          "type": "object",
+          "description": "Serialized RPG levels and unlocked shop cosmetics."
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "description": "Client/server epoch timestamp in milliseconds."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last economy update."
+        }
+      },
+      "required": [
+        "uid",
+        "playerCoins",
+        "save",
+        "updatedAtMs",
+        "updatedAt"
+      ]
+    },
+    "AnalyticsUser": {
+      "title": "AnalyticsUser",
+      "description": "Registered Google/Play Games player record with session duration analytics and in-game 1-5 star rating.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Player unique identifier (Google UID).",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Player display name.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "email": {
+          "type": "string",
+          "description": "Player Google email address.",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "matchesPlayed": {
+          "type": "integer",
+          "description": "Total matches played by the user."
+        },
+        "totalSessionSeconds": {
+          "type": "integer",
+          "description": "Cumulative session duration in seconds."
+        },
+        "sessionCount": {
+          "type": "integer",
+          "description": "Number of recorded sessions."
+        },
+        "ratingStars": {
+          "type": "integer",
+          "description": "Star rating (0 if unrated, 1 to 5 stars after 3rd match)."
+        },
+        "ratingComment": {
+          "type": "string",
+          "description": "Optional feedback comment from rating popup.",
+          "maxLength": 300
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "description": "Epoch timestamp in milliseconds."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last analytics update."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "email",
+        "matchesPlayed",
+        "totalSessionSeconds",
+        "sessionCount",
+        "ratingStars",
+        "ratingComment",
+        "updatedAtMs",
+        "updatedAt"
+      ]
+    },
+    "GameMediaConfig": {
+      "title": "GameMediaConfig",
+      "description": "Global dynamic cloud media configuration (config/gameMedia) storing Firebase Storage/Cloud URLs for titleBGM, lobbyBGM, titleAnimation (.mp4), and splashAnimation (.mp4).",
+      "type": "object",
+      "properties": {
+        "configId": {
+          "type": "string",
+          "description": "Document identifier (gameMedia).",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "titleBgmUrl": {
+          "type": "string",
+          "description": "Public Cloud URL for titleBGM (Title Screen / Login).",
+          "maxLength": 1024
+        },
+        "lobbyBgmUrl": {
+          "type": "string",
+          "description": "Public Cloud URL for lobbyBGM (Main Menu / Lobby).",
+          "maxLength": 1024
+        },
+        "titleAnimationUrl": {
+          "type": "string",
+          "description": "Public Cloud URL for titleAnimation (.mp4 muted loop video on Title Screen).",
+          "maxLength": 1024
+        },
+        "splashAnimationUrl": {
+          "type": "string",
+          "description": "Public Cloud URL for splashAnimation (.mp4 animated studio logo video with audio on Splash Screen).",
+          "maxLength": 1024
+        },
+        "titleBgmTrackId": {
+          "type": "string",
+          "description": "Track ID for titleBGM.",
+          "maxLength": 128
+        },
+        "lobbyBgmTrackId": {
+          "type": "string",
+          "description": "Track ID for lobbyBGM.",
+          "maxLength": 128
+        },
+        "titleAnimationTrackId": {
+          "type": "string",
+          "description": "Track ID for titleAnimation (.mp4).",
+          "maxLength": 128
+        },
+        "splashAnimationTrackId": {
+          "type": "string",
+          "description": "Track ID for splashAnimation (.mp4).",
+          "maxLength": 128
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "description": "Epoch timestamp in milliseconds."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last media update."
+        }
+      },
+      "required": [
+        "configId",
+        "titleBgmUrl",
+        "lobbyBgmUrl",
+        "titleAnimationUrl",
+        "splashAnimationUrl",
+        "titleBgmTrackId",
+        "lobbyBgmTrackId",
+        "titleAnimationTrackId",
+        "splashAnimationTrackId",
+        "updatedAtMs",
+        "updatedAt"
+      ]
+    },
+    "RoomSignal": {
+      "title": "RoomSignal",
+      "description": "Private room signaling document (/rooms/{roomCode}) storing normalized room code, lobby metadata, plain Offer/Answer objects ({ type, sdp }), and ICE Candidates serialized via candidate.toJSON().",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "description": "Normalized uppercase private room code identifier (doc ID).",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "hostId": {
+          "type": "string",
+          "description": "Host player ID.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "hostName": {
+          "type": "string",
+          "description": "Host display name.",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "hostCharacterId": {
+          "type": "string",
+          "description": "Host selected character ID.",
+          "enum": ["akira", "ren", "yuki", "hana", "kai"]
+        },
+        "guestId": {
+          "type": "string",
+          "description": "Guest player ID (empty until guest joins).",
+          "maxLength": 128
+        },
+        "guestName": {
+          "type": "string",
+          "description": "Guest display name (empty until guest joins).",
+          "maxLength": 32
+        },
+        "guestCharacterId": {
+          "type": "string",
+          "description": "Guest selected character ID.",
+          "enum": ["akira", "ren", "yuki", "hana", "kai"]
+        },
+        "mode": {
+          "type": "string",
+          "description": "Private room match mode.",
+          "enum": ["1v1", "2v2", "coop_2v2"]
+        },
+        "arenaId": {
+          "type": "string",
+          "description": "Selected arena ID.",
+          "minLength": 2,
+          "maxLength": 32
+        },
+        "status": {
+          "type": "string",
+          "description": "Room lifecycle state.",
+          "enum": ["lobby", "playing", "finished"]
+        },
+        "offer": {
+          "type": "object",
+          "description": "Plain serialized RTCSessionDescription offer object { type, sdp }."
+        },
+        "answer": {
+          "type": "object",
+          "description": "Plain serialized RTCSessionDescription answer object { type, sdp }."
+        },
+        "hostCandidates": {
+          "type": "array",
+          "description": "List of Host ICE candidates converted via candidate.toJSON()."
+        },
+        "guestCandidates": {
+          "type": "array",
+          "description": "List of Guest ICE candidates converted via candidate.toJSON()."
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "description": "Epoch timestamp in milliseconds."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last signaling update."
+        }
+      },
+      "required": [
+        "roomCode",
+        "hostId",
+        "hostName",
+        "hostCharacterId",
+        "guestId",
+        "guestName",
+        "guestCharacterId",
+        "mode",
+        "arenaId",
+        "status",
+        "offer",
+        "answer",
+        "hostCandidates",
+        "guestCandidates",
+        "updatedAtMs",
+        "updatedAt"
+      ]
+    },
+    "RoomIceCandidate": {
+      "title": "RoomIceCandidate",
+      "description": "WebRTC ICE candidate document stored in /rooms/{roomCode}/offerCandidates/{candidateId} (Host) or /rooms/{roomCode}/answerCandidates/{candidateId} (Guest), serialized via candidate.toJSON().",
+      "type": "object",
+      "properties": {
+        "candidateId": {
+          "type": "string",
+          "description": "Unique ICE candidate document identifier.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "roomCode": {
+          "type": "string",
+          "description": "Normalized uppercase parent room code.",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "candidate": {
+          "type": "string",
+          "description": "ICE candidate SDP string from candidate.toJSON().",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "sdpMid": {
+          "type": "string",
+          "description": "Media stream identification tag.",
+          "maxLength": 64
+        },
+        "sdpMLineIndex": {
+          "type": "integer",
+          "description": "Zero-based m-line index in SDP."
+        },
+        "usernameFragment": {
+          "type": "string",
+          "description": "ICE username fragment.",
+          "maxLength": 128
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "description": "Client epoch timestamp in milliseconds."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the ICE candidate was written."
+        }
+      },
+      "required": [
+        "candidateId",
+        "roomCode",
+        "candidate",
+        "sdpMid",
+        "sdpMLineIndex",
+        "usernameFragment",
+        "createdAtMs",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/publicProfiles/{userId}": {
+      "schema": {
+        "$ref": "#/entities/PublicProfile"
+      },
+      "description": "Public player profiles and competitive stats."
+    },
+    "/userAccounts/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserAccount"
+      },
+      "description": "Isolated private user account information and preferences."
+    },
+    "/matchHistory/{matchId}": {
+      "schema": {
+        "$ref": "#/entities/MatchRecord"
+      },
+      "description": "Immutable match history records."
+    },
+    "/globalSettings/{settingId}": {
+      "schema": {
+        "$ref": "#/entities/GlobalAudioSettings"
+      },
+      "description": "Global audio settings (menuMusicUrl, crowdAmbientUrl, shoeSqueakUrls) persisted across deploys."
+    },
+    "/audioConfig/{configId}": {
+      "schema": {
+        "$ref": "#/entities/AudioConfig"
+      },
+      "description": "Global custom audio configuration and URL assignments."
+    },
+    "/audioTracks/{trackId}": {
+      "schema": {
+        "$ref": "#/entities/AudioTrack"
+      },
+      "description": "Uploaded custom audio tracks metadata and URLs."
+    },
+    "/audioBlobs/{chunkId}": {
+      "schema": {
+        "$ref": "#/entities/AudioBlobChunk"
+      },
+      "description": "Chunked binary audio storage for stateless Cloud Run streaming."
+    },
+    "/playerEconomy/{userId}": {
+      "schema": {
+        "$ref": "#/entities/PlayerEconomy"
+      },
+      "description": "Persistent player RPG stats, shop unlocks, and coin balance."
+    },
+    "/analyticsUsers/{userId}": {
+      "schema": {
+        "$ref": "#/entities/AnalyticsUser"
+      },
+      "description": "Registered user analytics, session time tracking, and 1-5 star ratings."
+    },
+    "/config/{configId}": {
+      "schema": {
+        "$ref": "#/entities/GameMediaConfig"
+      },
+      "description": "Dynamic cloud media URLs (config/gameMedia: titleBGM, lobbyBGM, titleAnimation .mp4)."
+    },
+    "/rooms/{roomCode}": {
+      "schema": {
+        "$ref": "#/entities/RoomSignal"
+      },
+      "description": "Private room signaling documents (doc(db, 'rooms', roomCode)) with plain Offer/Answer objects and candidate.toJSON() arrays."
+    },
+    "/rooms/{roomCode}/offerCandidates/{candidateId}": {
+      "schema": {
+        "$ref": "#/entities/RoomIceCandidate"
+      },
+      "description": "Host WebRTC ICE candidates subcollection under /rooms/{roomCode}."
+    },
+    "/rooms/{roomCode}/answerCandidates/{candidateId}": {
+      "schema": {
+        "$ref": "#/entities/RoomIceCandidate"
+      },
+      "description": "Guest WebRTC ICE candidates subcollection under /rooms/{roomCode}."
+    }
+  }
+}
+

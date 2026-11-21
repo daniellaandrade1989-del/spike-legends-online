@@ -1,0 +1,6 @@
+{
+  "name": "Spike Legends Online",
+  "description": "Jogo de vôlei 3D anime multiplayer online com física Rapier, cel shading, modos 1x1, 2x2 e contra IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
