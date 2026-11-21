@@ -1,12 +1,9 @@
-
 /**
  * SPIKE LEGENDS ONLINE
  * Express + Socket.IO + Vite
  *
  * Servidor principal do jogo.
  */
-
-import 'dotenv/config';
 
 import http from 'node:http';
 import path from 'node:path';
@@ -26,7 +23,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-const JSON_LIMIT = process.env.JSON_LIMIT || '10mb';
+const JSON_LIMIT = process.env.JSON_LIMIT || '50mb';
 
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || '')
   .split(',')
@@ -43,14 +40,22 @@ let shuttingDown = false;
  * Validação de origem.
  */
 function isOriginAllowed(origin?: string): boolean {
-  // Clientes nativos e ferramentas sem Origin.
+  // Clientes nativos (Android/Capacitor) e ferramentas sem Origin.
   if (!origin) return true;
 
-  // Desenvolvimento local.
-  if (!IS_PRODUCTION) return true;
+  // Desenvolvimento local ou quando nenhuma restrição CORS_ORIGINS foi configurada.
+  if (!IS_PRODUCTION || ALLOWED_ORIGINS.length === 0) return true;
 
-  // Em produção, exigir origens explicitamente autorizadas.
-  return ALLOWED_ORIGINS.includes(origin.replace(/\/$/, ''));
+  const cleanOrigin = origin.replace(/\/$/, '');
+  if (
+    cleanOrigin.endsWith('.onrender.com') ||
+    cleanOrigin === 'http://localhost' ||
+    cleanOrigin === 'capacitor://localhost'
+  ) {
+    return true;
+  }
+
+  return ALLOWED_ORIGINS.includes(cleanOrigin);
 }
 
 /**
@@ -92,7 +97,6 @@ async function bootstrapServer(): Promise<void> {
      */
     allowRequest: (request, callback) => {
       const origin = request.headers.origin;
-
       callback(null, isOriginAllowed(origin));
     },
 
@@ -134,12 +138,13 @@ async function bootstrapServer(): Promise<void> {
    * Health check.
    */
   app.get('/api/health', (_req, res) => {
+    const clientsCount = io?.engine?.clientsCount ?? 0;
     res.status(200).json({
       status: 'ok',
       game: 'Spike Legends Online',
       environment: IS_PRODUCTION ? 'production' : 'development',
-      multiplayer: io?.engine?.clientsCount >= 0,
-      connectedClients: io?.engine?.clientsCount ?? 0,
+      multiplayer: clientsCount >= 0,
+      connectedClients: clientsCount,
       uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
     });
@@ -203,7 +208,6 @@ async function bootstrapServer(): Promise<void> {
 
     /**
      * Fallback para aplicações SPA.
-     * Compatível com Express 4.
      */
     app.use((req, res, next) => {
       if (
