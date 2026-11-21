@@ -1,6 +1,6 @@
 /**
  * Spike Legends Online — Viewport 3D Three.js + Loop de Jogo (Desacoplado do React)
- * Suporta simulação local Rapier (Treino / VS IA) e partidas autoritativas online (Socket.io).
+ * Suporta simulação local Rapier (Treino / VS IA) e partidas autoritativas online (Socket.io + Client-Side Prediction).
  */
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
@@ -237,7 +237,7 @@ export const GameViewport: React.FC<GameViewportProps> = ({
   const rebuildArenaFnRef = useRef<((arenaId: ArenaId) => void) | null>(null);
   const startLocalSimFnRef = useRef<(() => void) | null>(null);
   const latestOnlineSnapRef = useRef<MatchSnapshot | null>(null);
-  const latestRemoteInputsRef = useRef<Map<string, PlayerInputState>>(new Map());
+  const latestRemoteInputsRef = useRef>(new Map());
   const pendingNetworkSetsRef = useRef<PerformSetPayload[]>([]);
   const processedEventsTickRef = useRef<number>(-1);
 
@@ -425,6 +425,23 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     let pendingReplayDelay = -1;
     let lastReplayMetaKey = '';
     let prevSimPhase: MatchSnapshot['phase'] = 'serve_wait';
+
+    // Previsão local imediata (Client-Side Prediction) para o convidado online responder em 0ms
+    const guestPred = {
+      initialized: false,
+      x: 0,
+      y: 0,
+      z: 0,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      facingX: -1,
+      anim: 'idle' as MatchSnapshot['players'][number]['anim'],
+      actionState: 'idle' as MatchSnapshot['players'][number]['actionState'],
+      actionTimer: 0,
+      lastReconciledTick: -1,
+      localJumpFxCooldown: 0,
+    };
 
     const emitReplayMeta = (force = false) => {
       const meta = replayManager.getMeta();
@@ -656,6 +673,8 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     };
 
     startLocalSimFnRef.current = () => {
+      guestPred.initialized = false;
+      guestPred.lastReconciledTick = -1;
       // Para exclusivamente a música de fundo (bgmSource.Stop()) ao iniciar a simulação da partida
       if (screenStateRef.current === 'playing' || screenStateRef.current === 'guide') {
         const bgmAudioSource = customSoundtrackManager.bgmAudioSource;
@@ -728,7 +747,7 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       const mouseCode = mouseButtonToCode(e.button);
       if (mouseCode && matchesActionKey(keyBindingsRef.current, 'spike', mouseCode)) {
         const localP = currentSnapshot?.players.find((pl) => pl.id === matchConfigRef.current.localPlayerId);
-        if (localP && localP.y > 0.25) {
+        if (localP && (localP.y > 0.25 || guestPred.y > 0.25)) {
           playerRigs.get(localP.id)?.animator.OnSpike();
         }
       }
@@ -788,10 +807,11 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         return;
       }
       if (!localP) return;
+      const curLocalX = guestPred.initialized ? guestPred.x : localP.x;
       const worldTargetX = isRightSide
         ? Math.max(0.6, Math.min(COURT.HALF_WIDTH + 0.8, rawWorldX))
         : Math.max(-COURT.HALF_WIDTH - 0.8, Math.min(-0.6, rawWorldX));
-      const diffX = worldTargetX - localP.x;
+      const diffX = worldTargetX - curLocalX;
       inputManager.setMouseSteerDirection(Math.abs(diffX) > 0.25 ? Math.sign(diffX) * Math.min(1, Math.abs(diffX)) : 0);
     };
 
@@ -844,6 +864,8 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     let lastReportedFeedKey = '';
     let finishedDispatched = false;
     let onlineInputTimer = 0;
+    let lastSentMoveX = 0;
+    let lastSentMoveZ = 0;
     let onlineHostStateTimer = 0;
     let hostPendingEvents: MatchEvent[] = [];
     let onlineWatchdogTimer = 0;
@@ -852,6 +874,11 @@ export const GameViewport: React.FC<GameViewportProps> = ({
     let disposed = false;
 
     const handleEvents = (events: MatchEvent[], isShowcase: boolean) => {
+      const cfg = matchConfigRef.current;
+      const isOnlineGuest = Boolean(
+        cfg.isOnline && !(cfg.room && cfg.room.hostId === cfg.localPlayerId),
+      );
+
       for (const ev of events) {
         const actor = ev.playerId
           ? currentSnapshot?.players.find((p) => p.id === ev.playerId)
@@ -876,10 +903,16 @@ export const GameViewport: React.FC<GameViewportProps> = ({
             soundEngine.playWhistle();
           }
         } else if (ev.type === 'jump') {
-          vfx.spawnBurst(ev.x, 0.1, ev.z, 5, 0xf8fafc, 2.8, 0.7);
-          if (!isShowcase) {
-            soundEngine.playJump();
-            gameFeel.triggerJump(actor?.characterId ?? 'akira', true);
+          const skipLocalGuestDup =
+            isOnlineGuest &&
+            ev.playerId === cfg.localPlayerId &&
+            guestPred.localJumpFxCooldown > 0;
+          if (!skipLocalGuestDup) {
+            vfx.spawnBurst(ev.x, 0.1, ev.z, 5, 0xf8fafc, 2.8, 0.7);
+            if (!isShowcase) {
+              soundEngine.playJump();
+              gameFeel.triggerJump(actor?.characterId ?? 'akira', true);
+            }
           }
         } else if (ev.type === 'dive') {
           vfx.spawnBurst(ev.x, 0.25, ev.z, 10, 0xfde68a, 4.6, 0.9);
@@ -993,9 +1026,6 @@ export const GameViewport: React.FC<GameViewportProps> = ({
                   : 'spike';
               callbacksRef.current.onSpecialPointScored?.(reason);
             }
-            // PRIORIDADE 5 — Remoção do Replay:
-            // Mantém pendingReplayDelay = -1 para desativar completamente o Replay da partida.
-            // Após o aviso de ponto (~2 segundos no point_freeze), o jogo reseta a quadra e vai direto para o próximo saque.
             pendingReplayDelay = -1;
           }
         } else if (ev.type === 'victory') {
@@ -1163,10 +1193,169 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         );
 
         if (cfg.isOnline && !isOnlineHost && state === 'playing') {
-          // Convidado P2P (Guest): envia inputs compactos a ~28 Hz (36ms) ou imediatamente em gatilhos discretos via RTCDataChannel
+          // Convidado P2P (Guest):
+          // 1) Aplica Previsão Local Imediata (0ms) no próprio personagem antes mesmo do pacote ir e voltar da rede
+          const snapForPred = latestOnlineSnapRef.current;
+          const serverLocalP = snapForPred?.players.find((pl) => pl.id === cfg.localPlayerId);
+          if (serverLocalP && snapForPred) {
+            if (!guestPred.initialized) {
+              guestPred.initialized = true;
+              guestPred.x = serverLocalP.x;
+              guestPred.y = serverLocalP.y;
+              guestPred.z = serverLocalP.z;
+              guestPred.vx = serverLocalP.vx;
+              guestPred.vy = serverLocalP.vy;
+              guestPred.vz = serverLocalP.vz;
+              guestPred.facingX = serverLocalP.facingX;
+              guestPred.anim = serverLocalP.anim;
+              guestPred.actionState = serverLocalP.actionState;
+            }
+
+            guestPred.localJumpFxCooldown = Math.max(0, guestPred.localJumpFxCooldown - simDt);
+
+            if (snapForPred.phase === 'point_freeze' || snapForPred.phase === 'finished') {
+              guestPred.x = serverLocalP.x;
+              guestPred.y = serverLocalP.y;
+              guestPred.z = serverLocalP.z;
+              guestPred.vx = serverLocalP.vx;
+              guestPred.vy = serverLocalP.vy;
+              guestPred.anim = serverLocalP.anim;
+              guestPred.actionState = serverLocalP.actionState;
+              guestPred.actionTimer = 0;
+            } else if ((serverLocalP.stunTimer ?? 0) <= 0) {
+              const speedStat = cfg.localStats?.speed ?? serverLocalP.stats?.speed ?? 75;
+              const baseSpd = 6.8 + (speedStat / 100) * 1.8;
+              const moveSpd = inputState.sprint ? baseSpd * 1.28 : baseSpd;
+
+              if (guestPred.actionState !== 'slide_dive' || guestPred.actionTimer <= 0) {
+                const targetVx = inputState.moveX * moveSpd;
+                const accel = Math.abs(inputState.moveX) > 0.05 ? 30 : 26;
+                guestPred.vx = THREE.MathUtils.lerp(
+                  guestPred.vx,
+                  targetVx,
+                  Math.min(1, accel * simDt),
+                );
+              }
+
+              guestPred.x += guestPred.vx * simDt;
+
+              const isMyServeWait =
+                snapForPred.phase === 'serve_wait' && snapForPred.servingTeam === serverLocalP.team;
+              if (serverLocalP.team === 'right') {
+                const maxRight = isMyServeWait ? COURT.HALF_WIDTH + 2.2 : COURT.HALF_WIDTH + 1.2;
+                guestPred.x = THREE.MathUtils.clamp(guestPred.x, 0.55, maxRight);
+              } else {
+                const minLeft = isMyServeWait ? -COURT.HALF_WIDTH - 2.2 : -COURT.HALF_WIDTH - 1.2;
+                guestPred.x = THREE.MathUtils.clamp(guestPred.x, minLeft, -0.55);
+              }
+
+              if (Math.abs(inputState.moveX) > 0.1) {
+                guestPred.facingX = Math.sign(inputState.moveX);
+              } else {
+                guestPred.facingX = serverLocalP.team === 'right' ? -1 : 1;
+              }
+
+              // Pulo imediato (0ms)
+              if (inputState.jump && guestPred.y <= 0.06) {
+                const jumpStat = cfg.localStats?.jump ?? serverLocalP.stats?.jump ?? 75;
+                guestPred.vy = 8.4 + (jumpStat / 100) * 1.6;
+                guestPred.y = 0.07;
+                guestPred.anim = 'jump';
+                guestPred.actionState = 'jump';
+                guestPred.actionTimer = 0.34;
+                if (guestPred.localJumpFxCooldown <= 0) {
+                  guestPred.localJumpFxCooldown = 0.38;
+                  vfx.spawnBurst(guestPred.x, 0.1, guestPred.z, 5, 0xf8fafc, 2.8, 0.7);
+                  soundEngine.playJump();
+                  gameFeel.triggerJump(serverLocalP.characterId, true);
+                }
+              }
+
+              if (guestPred.y > 0 || guestPred.vy > 0) {
+                const grav = Math.abs(PHYSICS.GRAVITY) || 22;
+                guestPred.vy -= grav * simDt;
+                guestPred.y += guestPred.vy * simDt;
+                if (guestPred.y <= 0) {
+                  guestPred.y = 0;
+                  guestPred.vy = 0;
+                }
+              }
+
+              // Ações imediatas (0ms) nos botões de ataque, levantamento, recepção e mergulho
+              const localRigEntry = playerRigs.get(cfg.localPlayerId);
+              if (inputState.spike) {
+                guestPred.anim = 'spike';
+                guestPred.actionState = 'spike';
+                guestPred.actionTimer = 0.32;
+                localRigEntry?.animator.OnSpike();
+              } else if (inputState.set) {
+                guestPred.anim = 'set';
+                guestPred.actionState = 'set';
+                guestPred.actionTimer = 0.28;
+                localRigEntry?.animator.OnSet();
+              } else if (inputState.receive) {
+                guestPred.anim = 'bump';
+                guestPred.actionState = 'bump';
+                guestPred.actionTimer = 0.28;
+                localRigEntry?.animator.OnReceive();
+              } else if (inputState.dive) {
+                guestPred.anim = 'dive';
+                guestPred.actionState = 'slide_dive';
+                guestPred.actionTimer = 0.42;
+                const diveDir =
+                  Math.abs(inputState.moveX) > 0.1
+                    ? Math.sign(inputState.moveX)
+                    : serverLocalP.team === 'right'
+                      ? -1
+                      : 1;
+                guestPred.vx = diveDir * 10.5;
+              }
+
+              guestPred.actionTimer = Math.max(0, guestPred.actionTimer - simDt);
+              if (guestPred.actionTimer <= 0) {
+                if (guestPred.y > 0.08) {
+                  guestPred.anim = 'jump';
+                  guestPred.actionState = 'jump';
+                } else if (Math.abs(guestPred.vx) > 0.45) {
+                  guestPred.anim = 'run';
+                  guestPred.actionState = 'run';
+                } else {
+                  guestPred.anim = 'idle';
+                  guestPred.actionState = 'idle';
+                }
+              }
+            }
+
+            // Reconciliação suave quando chega novo pacote autoritativo do Host
+            if (snapForPred.tick !== guestPred.lastReconciledTick) {
+              guestPred.lastReconciledTick = snapForPred.tick;
+              const errX = serverLocalP.x - guestPred.x;
+              const errY = serverLocalP.y - guestPred.y;
+              if (Math.abs(errX) > 3.2) {
+                guestPred.x = serverLocalP.x;
+                guestPred.y = serverLocalP.y;
+                guestPred.vx = serverLocalP.vx;
+                guestPred.vy = serverLocalP.vy;
+              } else {
+                const isIdleInput = Math.abs(inputState.moveX) < 0.05 && Math.abs(serverLocalP.vx) < 0.25;
+                guestPred.x += errX * (isIdleInput ? 0.3 : 0.12);
+                if (guestPred.y <= 0.02 && serverLocalP.y <= 0.02) {
+                  guestPred.y = 0;
+                } else if (Math.abs(errY) > 1.4 && guestPred.actionTimer <= 0) {
+                  guestPred.y = THREE.MathUtils.lerp(guestPred.y, serverLocalP.y, 0.35);
+                }
+              }
+            }
+          }
+
+          // 2) Envia inputs ao Host em 0ms sempre que qualquer botão ou direção mudar (e a 45 Hz contínuo)
           onlineInputTimer += simDt;
+          const moveChanged =
+            Math.abs(inputState.moveX - lastSentMoveX) > 0.05 ||
+            Math.abs(inputState.moveZ - lastSentMoveZ) > 0.05;
           const hasActionEdge = Boolean(
-            inputState.jump ||
+            moveChanged ||
+              inputState.jump ||
               inputState.spike ||
               inputState.set ||
               inputState.preparingServe ||
@@ -1179,8 +1368,10 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               inputState.serveUnderhandTrigger ||
               inputState.serveJumpTrigger,
           );
-          if (onlineInputTimer >= 0.033 || hasActionEdge) {
+          if (onlineInputTimer >= 0.022 || hasActionEdge) {
             onlineInputTimer = 0;
+            lastSentMoveX = inputState.moveX;
+            lastSentMoveZ = inputState.moveZ;
             networkClient.sendInput(
               {
                 moveX: Number(inputState.moveX.toFixed(3)),
@@ -1440,11 +1631,11 @@ export const GameViewport: React.FC<GameViewportProps> = ({
               dispatchSnapshotUiUpdates(currentSnapshot, state, cfg);
             }
 
-            // Host P2P envia pacotes compactos de estado a 20–30 Hz (~33ms) via RTCDataChannel (ordered: false, maxRetransmits: 0)
+            // Host P2P envia pacotes compactos de estado a 45 Hz (~22ms) para reduzir latência percebida do convidado
             if (isOnlineHost && currentSnapshot && state === 'playing') {
               onlineHostStateTimer += simDt;
               if (
-                onlineHostStateTimer >= 0.033 ||
+                onlineHostStateTimer >= 0.022 ||
                 hostPendingEvents.length > 0 ||
                 currentSnapshot.phase === 'finished'
               ) {
@@ -1464,15 +1655,14 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       return { inputState: localLatchedInput ?? inputState, replayFrameActive };
     };
 
-    // Heartbeat dedicado (25ms) para manter a física do Host e a sincronização P2P a 60Hz/28Hz
-    // mesmo quando a aba do Host está em segundo plano ou o WebGL renderiza abaixo de 60 FPS
+    // Heartbeat dedicado (20ms) para manter a física do Host e a sincronização P2P fluidas
     const simHeartbeatId = window.setInterval(() => {
       if (disposed || screenStateRef.current !== 'playing') return;
       const now = performance.now();
-      if (now - lastSimTime >= 22) {
+      if (now - lastSimTime >= 18) {
         advanceGameplaySimulation(now);
       }
-    }, 25);
+    }, 20);
 
     const tick = () => {
       if (disposed) return;
@@ -1487,6 +1677,9 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       const cfg = matchConfigRef.current;
       const isShowcase = state === 'title' || state === 'menu' || state === 'lobby';
       const isPaused = state !== 'playing' && (currentSnapshot !== null || state !== 'guide');
+      const isOnlineGuest = Boolean(
+        cfg.isOnline && !(cfg.room && cfg.room.hostId === cfg.localPlayerId),
+      );
 
       const { inputState, replayFrameActive } = advanceGameplaySimulation(now);
 
@@ -1495,8 +1688,8 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         const snap = currentSnapshot;
         const ball = snap.ball;
 
-        // Interpolação suave quando online
-        const lerpAlpha = cfg.isOnline ? 1 - Math.exp(-22 * dt) : 1;
+        // Interpolação suave para elementos remotos online
+        const lerpAlpha = cfg.isOnline ? 1 - Math.exp(-24 * dt) : 1;
         builtArena.ballMesh.position.x = THREE.MathUtils.lerp(builtArena.ballMesh.position.x, ball.x, lerpAlpha);
         builtArena.ballMesh.position.y = THREE.MathUtils.lerp(builtArena.ballMesh.position.y, ball.y, lerpAlpha);
         builtArena.ballMesh.position.z = THREE.MathUtils.lerp(builtArena.ballMesh.position.z, ball.z, lerpAlpha);
@@ -1554,27 +1747,40 @@ export const GameViewport: React.FC<GameViewportProps> = ({
             playerRigs.set(p.id, entry);
           }
 
-          entry.rig.root.position.x = THREE.MathUtils.lerp(entry.rig.root.position.x, p.x, lerpAlpha);
-          entry.rig.root.position.y = THREE.MathUtils.lerp(entry.rig.root.position.y, p.y, lerpAlpha);
-          entry.rig.root.position.z = THREE.MathUtils.lerp(entry.rig.root.position.z, p.z, lerpAlpha);
+          const isLocalPlayer = p.id === cfg.localPlayerId;
+          const useGuestPrediction = isLocalPlayer && isOnlineGuest && guestPred.initialized && state === 'playing';
+
+          const targetX = useGuestPrediction ? guestPred.x : p.x;
+          const targetY = useGuestPrediction ? guestPred.y : p.y;
+          const targetZ = useGuestPrediction ? guestPred.z : p.z;
+          const targetVx = useGuestPrediction ? guestPred.vx : p.vx;
+          const targetFacingX = useGuestPrediction ? guestPred.facingX : p.facingX;
+          const targetAnim = useGuestPrediction ? guestPred.anim : p.anim;
+          const targetActionState = useGuestPrediction ? guestPred.actionState : p.actionState;
+
+          // Jogador local sempre responde sem atraso de interpolação (1.0); oponente remoto suaviza
+          const playerLerpAlpha = isLocalPlayer ? 1 : lerpAlpha;
+          entry.rig.root.position.x = THREE.MathUtils.lerp(entry.rig.root.position.x, targetX, playerLerpAlpha);
+          entry.rig.root.position.y = THREE.MathUtils.lerp(entry.rig.root.position.y, targetY, playerLerpAlpha);
+          entry.rig.root.position.z = THREE.MathUtils.lerp(entry.rig.root.position.z, targetZ, playerLerpAlpha);
 
           entry.animator.syncFromStateMachine({
-            anim: p.anim,
-            actionState: p.actionState,
-            vx: p.vx,
-            y: p.y,
-            x: p.x,
+            anim: targetAnim,
+            actionState: targetActionState,
+            vx: targetVx,
+            y: targetY,
+            x: targetX,
             ballY: ball.y,
           });
           entry.animator.update(dt);
 
           updateCharacterRigAnimation(
             entry.rig,
-            p.anim,
+            targetAnim,
             elapsed,
             p.animTimer,
             entry.rig.root.position.y,
-            p.facingX,
+            targetFacingX,
             p.facingZ,
             p.ultimateActiveTimer > 0 || p.ultimateCharge >= PHYSICS.ULTIMATE_MAX,
             dt,
@@ -1582,7 +1788,7 @@ export const GameViewport: React.FC<GameViewportProps> = ({
           );
 
           // Atualiza barra Super Attack + timer regressivo de 5.0s + Barra de Força de Saque (Hold to Charge) via DOM refs (zero setState a 60Hz!)
-          if (p.id === cfg.localPlayerId) {
+          if (isLocalPlayer) {
             const pct = Math.min(1, p.ultimateCharge / PHYSICS.ULTIMATE_MAX);
             if (ultimateFillRef.current) {
               ultimateFillRef.current.style.transform = `scaleX(${pct})`;
@@ -1784,7 +1990,10 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         const bz = builtArena.ballMesh.position.z;
         let bestDist = Infinity;
         for (const p of currentSnapshot.players) {
-          const d = Math.hypot(p.x - bx, p.z - bz) - (p.y > 0.45 ? 1.2 : 0);
+          const isLocal = p.id === cfg.localPlayerId;
+          const px = isLocal && isOnlineGuest && guestPred.initialized ? guestPred.x : p.x;
+          const py = isLocal && isOnlineGuest && guestPred.initialized ? guestPred.y : p.y;
+          const d = Math.hypot(px - bx, p.z - bz) - (py > 0.45 ? 1.2 : 0);
           if (d < bestDist) {
             bestDist = d;
             activePlayer = p;
@@ -1793,27 +2002,31 @@ export const GameViewport: React.FC<GameViewportProps> = ({
       }
 
       if (!replayFrameActive && activePlayer) {
-        _activePos.x = activePlayer.x;
-        _activePos.y = activePlayer.y;
+        const isActiveLocal = activePlayer.id === cfg.localPlayerId;
+        _activePos.x = isActiveLocal && isOnlineGuest && guestPred.initialized ? guestPred.x : activePlayer.x;
+        _activePos.y = isActiveLocal && isOnlineGuest && guestPred.initialized ? guestPred.y : activePlayer.y;
         _activePos.z = activePlayer.z;
         if (!isShowcase && !isPaused && state === 'playing' && currentSnapshot) {
           const localP = currentSnapshot.players.find((p) => p.id === cfg.localPlayerId) ?? activePlayer;
-          const curSpeed = Math.hypot(localP.vx, localP.vz);
+          const curVx = isOnlineGuest && guestPred.initialized ? guestPred.vx : localP.vx;
+          const curY = isOnlineGuest && guestPred.initialized ? guestPred.y : localP.y;
+          const curAction = isOnlineGuest && guestPred.initialized ? guestPred.actionState : localP.actionState;
+          const curSpeed = Math.hypot(curVx, localP.vz);
           const isDirectionChange =
             Math.abs(prevLocalVx) >= 2.2 &&
-            Math.abs(localP.vx) >= 1.8 &&
-            Math.sign(prevLocalVx) !== Math.sign(localP.vx);
+            Math.abs(curVx) >= 1.8 &&
+            Math.sign(prevLocalVx) !== Math.sign(curVx);
           gameFeel.updateCourtFootsteps(
             dt,
             curSpeed,
-            localP.y <= 0.05,
+            curY <= 0.05,
             prevLocalSpeed,
             isDirectionChange,
-            localP.actionState,
+            curAction,
           );
           gameFeel.updateAiMovementSqueaks(currentSnapshot.players, dt, cfg.localPlayerId);
           prevLocalSpeed = curSpeed;
-          prevLocalVx = localP.vx;
+          prevLocalVx = curVx;
         }
       }
 
@@ -1834,6 +2047,11 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         _ballVel.z = currentSnapshot.ball.vz;
       }
 
+      const activeState =
+        activePlayer?.id === cfg.localPlayerId && isOnlineGuest && guestPred.initialized
+          ? guestPred.actionState
+          : (activePlayer?.actionState ?? 'idle');
+
       // Câmera Dinâmica 2.5D: Foco Duplo + Zoom Contextual de FOV + Screen Shake Escalonado + Flash
       const feel = gameFeel.updateCameraAndFeel(dt, elapsed, {
         aspect: camera.aspect,
@@ -1841,7 +2059,7 @@ export const GameViewport: React.FC<GameViewportProps> = ({
         ballPos: _ballPos,
         ballVel: _ballVel,
         activePlayerPos: _activePos,
-        activePlayerState: activePlayer?.actionState ?? 'idle',
+        activePlayerState: activeState,
         isShowcase,
       });
 
